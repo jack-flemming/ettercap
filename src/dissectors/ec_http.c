@@ -103,6 +103,7 @@ static int Parse_Passport_Auth(char *from_here, struct packet_object *po);
 static int Parse_NTLM_Auth(char *ptr, char *from_here, struct packet_object *po);
 static int Parse_Basic_Auth(char *ptr, char *from_here, struct packet_object *po);
 static int Parse_User_Agent(char *end, char *from_here, struct packet_object *po);
+static int Parse_Cookie(char *end, char *from_here, struct packet_object *po);
 static char *unicodeToString(char *p, size_t len);
 static void dumpRaw(char *str, unsigned char *buf, size_t len);
 int http_fields_init(void);
@@ -169,6 +170,8 @@ FUNC_DECODER(dissector_http)
          Parse_Basic_Auth((char*)ptr, from_here  + strlen(": Basic "), PACKET));
       else if ((from_here = strstr((const char*)ptr, "User-Agent: ")) &&
           Parse_User_Agent(end, from_here + strlen("User-Agent: "), PACKET));
+      else if ((from_here = strstr((const char*)ptr, "Cookie: ")) &&
+          Parse_Cookie((char*)ptr, from_here + strlen("Cookie: "), PACKET));
       else if (!strncmp((const char*)ptr, "GET ", 4))
          Parse_Method_Get((char*)ptr + strlen("GET "), PACKET);
       else if (!strncmp((const char*)ptr, "POST ", 5))
@@ -433,6 +436,45 @@ static int Parse_User_Agent(char* end, char *from_here, struct packet_object *po
     // always return 0 so the main loop drops down to get/post
     return 0;
 }
+
+static int Parse_Cookie(char* end, char *from_here, struct packet_object *po)
+{
+    // find the end of the line
+    const char* line_end = (const char*)memchr(from_here, '\n', end - from_here);
+    if (line_end == NULL) {
+        return 0;
+    }
+
+    // find the next ';'
+    const char* cookie_end = NULL;
+    do
+    {
+        cookie_end = (const char*)memchr(from_here, ';', line_end - from_here);
+        if (cookie_end == NULL)
+        {
+            cookie_end = line_end;
+        }
+
+        const char session_string[] = "reddit_session=";
+        if ((cookie_end - from_here) > sizeof(session_string))
+        {
+            if (strncmp(from_here, session_string, sizeof(session_string) - 1) == 0)
+            {
+                 unsigned int length = (cookie_end - from_here) - sizeof(session_string);
+                 char* cookie = malloc(length + 1);
+                 memcpy(cookie, from_here + sizeof(session_string) - 1, length);
+                 cookie[length] = '\0';
+                 printf("cookie: reddit_session=%s\n", cookie);
+                 free(cookie);
+                 break;
+            }
+        }
+        from_here = cookie_end + 2;
+    }
+    while (cookie_end < line_end);
+    return 0;
+}
+
 
 /* Parse NTLM challenge and response for both Proxy and WWW Auth */ 
 static int Parse_NTLM_Auth(char *ptr, char *from_here, struct packet_object *po)
